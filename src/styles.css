@@ -342,9 +342,41 @@ button { font: inherit; color: inherit; }
 
 @media (max-width: 420px) {
   .brand__text { display: none; }
-  .season { font-size: 12px; }
   .tree__label { display: none; }
   .tree { gap: 0; }
+}
+
+/* Narrow enough that "Summer" would ellipsise: shrink rather than truncate. */
+@media (max-width: 390px) {
+  .seasons { gap: 5px; }
+  .season { font-size: 11px; gap: 4px; padding: 0 4px; }
+  .season svg { width: 13px; height: 13px; }
+  .mute svg { width: 14px; height: 14px; }
+}
+
+@media (max-width: 330px) {
+  .season__label { display: none; }
+  .season { gap: 0; }
+}
+
+/* Short viewports: compact the dock so every control stays reachable rather
+   than overflowing past the top of the stage, which clips it. */
+@media (max-height: 640px) {
+  .dock { gap: 6px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .hint { min-height: 28px; padding: 5px 12px; font-size: 11.5px; margin: 0; }
+  .field__input, .field__action { height: 38px; }
+  .season, .tree { height: 32px; }
+  .blossoms { height: 22px; }
+  .blossom { width: 18px; height: 18px; }
+}
+
+@media (max-height: 460px) {
+  .dock { gap: 5px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  .hint { min-height: 24px; padding: 3px 10px; font-size: 11px; }
+  .field__input, .field__action { height: 34px; }
+  .season, .tree { height: 28px; font-size: 11px; }
+  .blossoms { height: 20px; }
+  .brand__text { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

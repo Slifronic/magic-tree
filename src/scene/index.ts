@@ -43,6 +43,7 @@ export class MagicTreeScene {
 
   private isoHalfW = 20;
   private isoHalfV = 20;
+  private isoCenter = new THREE.Vector3();
   private rimUnits = 40;
   /** Height of the control dock in CSS px, reported by the UI. */
   private dockPx = 200;
@@ -118,14 +119,15 @@ export class MagicTreeScene {
   }
 
   /**
-   * Measures how much screen space the scene needs at the isometric angle by
+   * Measures the scene's screen-space extent at the isometric angle by
    * projecting the plot corners and the canopy's bounding box onto the camera's
-   * screen axes. Fitting to the foliage rather than the branch tips is what
-   * stops a wide crown being clipped.
+   * own screen axes.
+   *
+   * It records the content's midpoint as well as its size. Sizing around an
+   * assumed target instead leaves an asymmetric canopy visibly off-centre.
    */
   private measureIsoFraming(rim: number) {
     const { canopyTop, canopyRadius } = this.canopy.model;
-    const targetY = canopyTop * 0.42;
 
     const dir = new THREE.Vector3(
       Math.cos(ISO_ELEVATION) * Math.sin(ISO_AZIMUTH),
@@ -150,16 +152,26 @@ export class MagicTreeScene {
       }
     }
 
-    let w = 0;
-    let v = 0;
-    const rel = new THREE.Vector3();
-    for (const p of points) {
-      rel.copy(p).sub(new THREE.Vector3(0, targetY, 0));
-      w = Math.max(w, Math.abs(rel.dot(right)));
-      v = Math.max(v, Math.abs(rel.dot(up)));
+    let wMin = Infinity;
+    let wMax = -Infinity;
+    let vMin = Infinity;
+    let vMax = -Infinity;
+    for (const pt of points) {
+      const w = pt.dot(right);
+      const v = pt.dot(up);
+      wMin = Math.min(wMin, w);
+      wMax = Math.max(wMax, w);
+      vMin = Math.min(vMin, v);
+      vMax = Math.max(vMax, v);
     }
-    this.isoHalfW = w * 1.05;
-    this.isoHalfV = v * 1.05;
+
+    this.isoHalfW = (wMax - wMin) / 2;
+    this.isoHalfV = (vMax - vMin) / 2;
+    // A world point that projects to the middle of the content.
+    this.isoCenter
+      .set(0, 0, 0)
+      .addScaledVector(right, (wMin + wMax) / 2)
+      .addScaledVector(up, (vMin + vMax) / 2);
   }
 
   private teardown() {
@@ -254,20 +266,25 @@ export class MagicTreeScene {
     const h = this.canvas.clientHeight || 1;
     const aspect = w / h;
 
-    const margin = 1.07;
-    const dockPx = Math.min(this.dockPx + 20, h * 0.55);
-    const usable = Math.max(h - dockPx, h * 0.5);
-    const halfRim = (this.rimUnits / 2) * margin;
-    // Whichever axis is tighter decides the zoom.
-    const topHalf = Math.max(halfRim * (h / usable), halfRim / aspect);
-    // Shift the framing down-world so the plot rides above the dock on screen.
-    const topPan = topHalf * (dockPx / h);
+    const margin = 1.05;
+    const dockPx = Math.min(this.dockPx + 18, h * 0.5);
+    const usable = Math.max(h - dockPx, h * 0.4);
 
-    const isoHalf = Math.max(this.isoHalfV, this.isoHalfW / aspect);
-    const half = lerp(isoHalf, topHalf, t);
-    // The iso view needs a partial shift too, or a tall dock eats the near
-    // corner of the plot.
-    const shift = lerp(topPan * 0.55, topPan, t);
+    // Both framings use one fit: size the content to the strip *above* the dock,
+    // then shift the camera so that strip — not the whole viewport — is what
+    // ends up centred. Fitting to the full height and nudging afterwards is what
+    // left the scene low with a void above it on tall, narrow screens.
+    const fit = (halfW: number, halfV: number) => {
+      const half = Math.max(halfV * (h / usable), halfW / aspect) * margin;
+      return { half, shift: (half * dockPx) / h };
+    };
+
+    const isoFit = fit(this.isoHalfW, this.isoHalfV);
+    const halfRim = this.rimUnits / 2;
+    const topFit = fit(halfRim, halfRim);
+
+    const half = lerp(isoFit.half, topFit.half, t);
+    const shift = lerp(isoFit.shift, topFit.shift, t);
 
     this.camera.left = -half * aspect;
     this.camera.right = half * aspect;
@@ -279,7 +296,6 @@ export class MagicTreeScene {
 
     const azimuth = lerp(ISO_AZIMUTH, 0, t);
     const elevation = lerp(ISO_ELEVATION, TOP_ELEVATION, t);
-    const targetY = lerp(this.canopy.model.canopyTop * 0.42, 0, t);
     const r = 220;
 
     this.offset.set(
@@ -295,7 +311,12 @@ export class MagicTreeScene {
       .addScaledVector(this.forward, -this.forward.y)
       .normalize();
 
-    this.target.set(0, targetY, 0).addScaledVector(this.screenUp, -shift);
+    // Aim at the content's midpoint, easing to the plot centre for the code
+    // view, then slide up by the dock offset.
+    this.target
+      .copy(this.isoCenter)
+      .multiplyScalar(1 - t)
+      .addScaledVector(this.screenUp, -shift);
     this.camera.position.copy(this.target).add(this.offset);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.target);
