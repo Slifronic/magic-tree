@@ -5,12 +5,37 @@ comes apart leaf by leaf, each one flying down into a module of the code below.
 
 ![The tree, summer](docs/tree.png)
 
-| Tap to reveal the code | Repaint the blossom |
+| Tap to reveal the code | A spring willow |
 | --- | --- |
 | ![The revealed QR code](docs/code.png) | ![Spring blossom](docs/spring.png) |
 
-Type a link, pick a season, and the tree regrows around it. The result actually
-scans — that constraint drove most of the interesting decisions below.
+Type a link, pick a species and a season, and the tree regrows around it. The
+result actually scans — that constraint drove most of the interesting decisions
+below.
+
+## Species
+
+Four silhouettes, each with its own growth profile in
+[`src/scene/species.ts`](src/scene/species.ts):
+
+| | |
+| --- | --- |
+| **Oak** | Broad, heavy, low-slung crown. |
+| **Pine** | A straight leader hung with whorls of side branches that shorten toward the tip. |
+| **Willow** | Branches flatten early and hang; foliage is stretched downward. |
+| **Birch** | Slender and upright, pale bark, a narrower crown. |
+
+![An autumn pine](docs/pine.png)
+
+A conifer is not the same shape problem as a broadleaf, so it does not share the
+recursion. `growConifer` builds the trunk and its whorls directly, which gives
+exact control of the cone; everything else grows fractally. The two broadleaf
+rings closest to the trunk are spaced evenly around the compass — left to
+chance, a tree throws all its weight to one side and visibly leans.
+
+Silhouette is finished by a post-pass. `taper` pulls the canopy in toward its
+axis with height, so the outline is exact even though the branching underneath
+stays organic.
 
 ## Running it
 
@@ -44,6 +69,16 @@ belongs to once the code resolves. A single `morph` value in `[0, 1]` drives
 everything — leaf position, scale, tumble, colour, and the camera swinging from
 isometric to straight overhead.
 
+The whole transition runs in **0.95 s**. The camera swings on an eased copy of
+the morph so it does not start or stop dead, and the per-leaf stagger is kept
+short — a long tail of straggling leaves is what makes a transition feel slow
+even when it is technically brief.
+
+The woody skeleton withdraws into the plot as the code resolves, shrinking
+toward the trunk base and gone by the time the morph is halfway. It has to be:
+leaving the branches up until the end left a trunk standing over the finished
+code.
+
 Leaves are handed out in runs of six, one run per dark module, and each run is
 laid out as a flat 3×2 grid at a **uniform** height:
 
@@ -69,8 +104,12 @@ Three things are tuned specifically for scanners rather than for looks:
   against a pale plot, so they darken on the way down.
 - **The grass rim sits outside the quiet zone**, never on it.
 
-The camera also fits the plot into the area *above* the control dock, so no part
-of the UI can ever cover a module.
+The camera fits the plot into the area *above* the control dock, so no part of
+the UI can ever cover a module. It measures the dock rather than assuming a
+height, so adding a row of controls cannot silently start clipping the code. The
+isometric view is fitted the same way, by projecting the plot corners and the
+canopy's bounding box onto the camera's screen axes — fitting to the foliage
+rather than the branch tips is what stops a wide crown being cut off.
 
 ### Determinism
 
@@ -88,11 +127,14 @@ The suite covers the parts that can be checked without a GPU: QR matrix
 structure and finder patterns, that every dark module receives exactly six
 leaves, that no leaf ever lands on a light module or in the quiet zone, that
 module blocks stay inside their own cell, that every block shares one height,
-and that tree growth is deterministic per seed.
+that tree growth is deterministic per seed, and that each species keeps a
+distinct silhouette — a conifer really is narrower for its height than a
+broadleaf, and its crown really does taper.
 
 Scannability itself was verified in the browser by rendering the settled code and
-decoding it back with [jsQR](https://github.com/cozmo/jsQR) — 30/30 across all
-three seasons, all six blossom swatches, and codes from version 21 up to 49.
+decoding it back with [jsQR](https://github.com/cozmo/jsQR) — 64/64 across every
+species, all three seasons, the blossom swatches, and codes from version 21 up
+to 49.
 
 ## Stack
 

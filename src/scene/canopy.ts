@@ -3,8 +3,9 @@ import { growTree, branchMatrix, type TreeModel } from './tree';
 import { type QrMatrix } from './qr';
 import { leafTarget, leafCountFor } from './moduleLayout';
 import { LEAVES_PER_MODULE } from './constants';
-import { hashString, makeRng, clamp01 } from './rng';
+import { hashString, makeRng, clamp01, smoothstep } from './rng';
 import type { Palette } from './palette';
+import type { Species } from './species';
 
 export interface Canopy {
   group: THREE.Group;
@@ -22,19 +23,15 @@ export interface Canopy {
  * Builds the tree and, for every leaf, the module cell it flies down to.
  * Leaf count is derived from the code so each dark module ends up evenly packed.
  */
-export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
+export function buildCanopy(qr: QrMatrix, palette: Palette, species: Species): Canopy {
   const seed = hashString(qr.text);
   const rng = makeRng(seed ^ 0x9e3779b9);
 
   const darkCells = qr.darkCells;
   const leafCount = leafCountFor(qr);
-  const treeHeight = qr.plot * 0.86;
+  const treeHeight = qr.plot * species.heightFactor;
 
-  const model = growTree(seed, {
-    height: treeHeight,
-    spread: 1.45,
-    leafCount,
-  });
+  const model = growTree(seed, { height: treeHeight, leafCount, species });
 
   const group = new THREE.Group();
 
@@ -47,6 +44,7 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
   const m = new THREE.Matrix4();
   model.branches.forEach((b, i) => branches.setMatrixAt(i, branchMatrix(b, m)));
   branches.instanceMatrix.needsUpdate = true;
+  branches.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   group.add(branches);
 
   // ---- leaves ----------------------------------------------------------
@@ -71,7 +69,7 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
     treePos[i * 3] = src.x;
     treePos[i * 3 + 1] = src.y;
     treePos[i * 3 + 2] = src.z;
-    treeScale[i] = 0.5 + rng() * 0.45;
+    treeScale[i] = model.leafScales[i];
     phase[i] = rng() * Math.PI * 2;
     spin[i * 3] = rng() * Math.PI;
     spin[i * 3 + 1] = rng() * Math.PI;
@@ -85,8 +83,9 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
     qrScale[i * 3 + 1] = target.sy;
     qrScale[i * 3 + 2] = target.sz;
 
-    // Outer leaves start moving first, which reads as the canopy unfurling.
-    delay[i] = clamp01(0.0001 + rng() * 0.35);
+    // A short stagger reads as the canopy unfurling; too much and the tail of
+    // stragglers makes the whole transition feel slow.
+    delay[i] = clamp01(0.0001 + rng() * 0.18);
   }
 
   const treeColors = new Float32Array(leafCount * 3);
@@ -110,8 +109,8 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
       treeColors[i * 3] = a.r; treeColors[i * 3 + 1] = a.g; treeColors[i * 3 + 2] = a.b;
       qrColors[i * 3] = b.r; qrColors[i * 3 + 1] = b.g; qrColors[i * 3 + 2] = b.b;
     }
-    const bark = new THREE.Color(p.bark);
-    const barkDark = new THREE.Color(p.barkDark);
+    const bark = new THREE.Color(species.bark?.bark ?? p.bark);
+    const barkDark = new THREE.Color(species.bark?.barkDark ?? p.barkDark);
     model.branches.forEach((b, i) =>
       branches.setColorAt(i, b.depth <= 1 ? barkDark : bark),
     );
@@ -127,6 +126,54 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
   const color = new THREE.Color();
   let paintedFor = -1;
 
+  // Cached branch transforms, so retracting them each frame is just a rescale.
+  const bMid = new Float32Array(model.branches.length * 3);
+  const bQuat = new Float32Array(model.branches.length * 4);
+  const bLen = new Float32Array(model.branches.length);
+  const bRad = new Float32Array(model.branches.length);
+  {
+    const dir = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    model.branches.forEach((b, i) => {
+      dir.copy(b.end).sub(b.start);
+      const len = dir.length();
+      bLen[i] = len;
+      bRad[i] = b.radius;
+      bMid[i * 3] = b.start.x + dir.x * 0.5;
+      bMid[i * 3 + 1] = b.start.y + dir.y * 0.5;
+      bMid[i * 3 + 2] = b.start.z + dir.z * 0.5;
+      q.setFromUnitVectors(up, dir.normalize());
+      bQuat[i * 4] = q.x; bQuat[i * 4 + 1] = q.y; bQuat[i * 4 + 2] = q.z; bQuat[i * 4 + 3] = q.w;
+    });
+  }
+  let branchesAt = -1;
+
+  /**
+   * Withdraws the woody skeleton into the plot as the code resolves. It has to
+   * be gone well before the leaves land, otherwise a trunk is left standing
+   * over the finished code.
+   */
+  const setBranchRetraction = (t: number) => {
+    if (branchesAt === t) return;
+    branchesAt = t;
+
+    const k = 1 - smoothstep(clamp01(t / 0.45));
+    branches.visible = k > 0.02;
+    if (!branches.visible) return;
+
+    for (let i = 0; i < model.branches.length; i++) {
+      // Shrink the whole skeleton toward the trunk base at the origin.
+      pos.set(bMid[i * 3] * k, bMid[i * 3 + 1] * k, bMid[i * 3 + 2] * k);
+      quat.set(bQuat[i * 4], bQuat[i * 4 + 1], bQuat[i * 4 + 2], bQuat[i * 4 + 3]);
+      scl.set(bRad[i] * k, bLen[i] * k, bRad[i] * k);
+      mat4.compose(pos, quat, scl);
+      branches.setMatrixAt(i, mat4);
+    }
+    branches.instanceMatrix.needsUpdate = true;
+    branches.castShadow = k > 0.4;
+  };
+
   const setMorph = (t: number, time: number) => {
     const settled = t > 0.999;
     for (let i = 0; i < leafCount; i++) {
@@ -138,7 +185,7 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
       // A gentle breeze while the canopy is up; dead still once it is a code.
       const sway = (1 - e) * 0.09 * Math.sin(time * 0.9 + phase[i]);
       // Leaves arc upward before dropping into place.
-      const lift = Math.sin(e * Math.PI) * 1.6;
+      const lift = Math.sin(e * Math.PI) * 1.15;
 
       pos.set(
         treePos[i * 3] + (qrPos[i * 3] - treePos[i * 3]) * e + sway,
@@ -181,7 +228,7 @@ export function buildCanopy(qr: QrMatrix, palette: Palette): Canopy {
     }
     // Once flat, the canopy must not cast anything onto the code.
     leaves.castShadow = !settled;
-    branches.visible = t < 0.985;
+    setBranchRetraction(t);
   };
 
   const dispose = () => {

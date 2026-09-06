@@ -8,6 +8,7 @@ import {
   type BlossomId,
   type Palette,
 } from './scene/palette';
+import { SPECIES, SPECIES_ORDER, type SpeciesId } from './scene/species';
 import { Ambience } from './audio/ambience';
 import {
   SpringIcon,
@@ -18,6 +19,10 @@ import {
   SoundOnIcon,
   SoundOffIcon,
   BrandMark,
+  OakIcon,
+  PineIcon,
+  WillowIcon,
+  BirchIcon,
 } from './ui/icons';
 
 const DEFAULT_URL = 'https://example.com';
@@ -26,18 +31,26 @@ const SEASON_ICONS: Record<SeasonId, () => React.ReactElement> = {
   summer: SummerIcon,
   autumn: AutumnIcon,
 };
+const SPECIES_ICONS: Record<SpeciesId, () => React.ReactElement> = {
+  oak: OakIcon,
+  pine: PineIcon,
+  willow: WillowIcon,
+  birch: BirchIcon,
+};
 
 /** Debounce regrowing the tree so it does not thrash on every keystroke. */
 const REBUILD_DELAY = 500;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<MagicTreeScene | null>(null);
   const ambienceRef = useRef<Ambience | null>(null);
 
   const [draft, setDraft] = useState(DEFAULT_URL);
   const [committed, setCommitted] = useState(DEFAULT_URL);
   const [season, setSeason] = useState<SeasonId>('summer');
+  const [species, setSpecies] = useState<SpeciesId>('oak');
   const [blossom, setBlossom] = useState<BlossomId>('blush');
   const [mode, setMode] = useState<ViewMode>('tree');
   const [muted, setMuted] = useState(true);
@@ -55,7 +68,7 @@ export default function App() {
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const scene = new MagicTreeScene(canvasRef.current, committed, palette);
+    const scene = new MagicTreeScene(canvasRef.current, committed, palette, SPECIES[species]);
     sceneRef.current = scene;
 
     const onResize = () => scene.resize();
@@ -83,6 +96,21 @@ export default function App() {
   useEffect(() => {
     sceneRef.current?.setMode(mode);
   }, [mode]);
+
+  useEffect(() => {
+    sceneRef.current?.setSpecies(species);
+  }, [species]);
+
+  // Report the dock's real height so the code is never framed underneath it.
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const report = () => sceneRef.current?.setDockHeight(el.getBoundingClientRect().height);
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setCommitted(draft.trim() || DEFAULT_URL), REBUILD_DELAY);
@@ -192,7 +220,7 @@ export default function App() {
         onKeyDown={onCanvasKey}
       />
 
-      <div className="dock">
+      <div className="dock" ref={dockRef}>
         <div className="dock__toast-anchor">
           {toast && <div className="toast">{toast}</div>}
           <button className="hint" type="button" onClick={toggleMode}>
@@ -219,6 +247,25 @@ export default function App() {
           >
             <ShareIcon />
           </button>
+        </div>
+
+        <div className="trees">
+          {SPECIES_ORDER.map((id) => {
+            const Icon = SPECIES_ICONS[id];
+            return (
+              <button
+                key={id}
+                className="tree"
+                type="button"
+                title={SPECIES[id].label}
+                aria-pressed={species === id}
+                onClick={() => setSpecies(id)}
+              >
+                <Icon />
+                <span className="tree__label">{SPECIES[id].label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="seasons">

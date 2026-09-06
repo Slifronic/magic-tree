@@ -3,6 +3,7 @@ import { buildQr, moduleToWorld, QUIET_ZONE } from '../qr';
 import { leafTarget, leafCountFor } from '../moduleLayout';
 import { LEAVES_PER_MODULE } from '../constants';
 import { growTree } from '../tree';
+import { SPECIES, SPECIES_ORDER } from '../species';
 import { hashString, makeRng } from '../rng';
 
 const SAMPLES = [
@@ -136,21 +137,21 @@ describe('moduleToWorld', () => {
 
 describe('tree growth', () => {
   it('is deterministic for a given seed', () => {
-    const opts = { height: 30, spread: 1.45, leafCount: 240 };
+    const opts = { height: 30, leafCount: 240, species: SPECIES.oak };
     const a = growTree(hashString('https://example.com'), opts);
     const b = growTree(hashString('https://example.com'), opts);
     expect(a.leaves.map((v) => v.toArray())).toEqual(b.leaves.map((v) => v.toArray()));
   });
 
   it('differs between seeds', () => {
-    const opts = { height: 30, spread: 1.45, leafCount: 240 };
+    const opts = { height: 30, leafCount: 240, species: SPECIES.oak };
     const a = growTree(hashString('one'), opts);
     const b = growTree(hashString('two'), opts);
     expect(a.leaves[0].toArray()).not.toEqual(b.leaves[0].toArray());
   });
 
   it('produces exactly the requested number of leaves and grows upward', () => {
-    const tree = growTree(1234, { height: 30, spread: 1.45, leafCount: 500 });
+    const tree = growTree(1234, { height: 30, leafCount: 500, species: SPECIES.oak });
     expect(tree.leaves).toHaveLength(500);
     expect(tree.height).toBeGreaterThan(10);
     expect(tree.branches.length).toBeGreaterThan(50);
@@ -167,5 +168,49 @@ describe('rng', () => {
       expect(v).toBeLessThan(1);
       expect(v).toBe(b());
     }
+  });
+});
+
+describe('species', () => {
+  const opts = { height: 32, leafCount: 600 };
+
+  it('every species grows a usable tree', () => {
+    for (const id of SPECIES_ORDER) {
+      const tree = growTree(hashString(id), { ...opts, species: SPECIES[id] });
+      expect(tree.leaves).toHaveLength(opts.leafCount);
+      expect(tree.leafScales).toHaveLength(opts.leafCount);
+      expect(tree.branches.length).toBeGreaterThan(20);
+      expect(tree.height).toBeGreaterThan(opts.height * 0.3);
+      for (const leaf of tree.leaves) expect(Number.isFinite(leaf.y)).toBe(true);
+    }
+  });
+
+  it('gives each species a distinct silhouette', () => {
+    // Match how the canopy actually calls it: plot width scaled by heightFactor.
+    const shape = (id: (typeof SPECIES_ORDER)[number]) => {
+      const sp = SPECIES[id];
+      const tree = growTree(99, { ...opts, height: 37 * sp.heightFactor, species: sp });
+      let maxR = 0;
+      for (const l of tree.leaves) maxR = Math.max(maxR, Math.hypot(l.x, l.z));
+      return { ratio: maxR / tree.height, height: tree.height };
+    };
+    const oak = shape('oak');
+    const pine = shape('pine');
+    const birch = shape('birch');
+
+    // A conifer is markedly narrower for its height than a broadleaf.
+    expect(pine.ratio).toBeLessThan(oak.ratio);
+    expect(birch.ratio).toBeLessThan(oak.ratio);
+    expect(pine.height).toBeGreaterThan(oak.height);
+  });
+
+  it('tapers the crown of a conifer', () => {
+    const tree = growTree(7, { ...opts, species: SPECIES.pine });
+    const spreadAt = (lo: number, hi: number) => {
+      const band = tree.leaves.filter((l) => l.y >= tree.height * lo && l.y < tree.height * hi);
+      if (!band.length) return 0;
+      return Math.max(...band.map((l) => Math.hypot(l.x, l.z)));
+    };
+    expect(spreadAt(0.75, 1.0)).toBeLessThan(spreadAt(0.25, 0.5));
   });
 });

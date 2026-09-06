@@ -77,3 +77,38 @@ export const BrandMark = () => (
     <rect x="8" y="19" width="8" height="2" rx="1" fill="currentColor" opacity="0.42" />
   </svg>
 );
+
+/* ------------------------------------------------------------------ trees */
+
+export const OakIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
+    <path d="M12 21v-6.5" />
+    <path d="M6.6 13.4a4 4 0 0 1 .7-7.2 4.3 4.3 0 0 1 8-1 3.8 3.8 0 0 1 2.9 6.6 3.9 3.9 0 0 1-3.3 1.9H8.4a3.7 3.7 0 0 1-1.8-.3Z" />
+    <path d="m12 17-2.2-2M12 15.6l2-1.8" />
+  </svg>
+);
+
+export const PineIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
+    <path d="M12 21v-3" />
+    <path d="M12 2.6 8.2 8.4h7.6L12 2.6Z" />
+    <path d="M12 7.6 6.6 14h10.8L12 7.6Z" />
+    <path d="M12 12.4 5.4 18.4h13.2L12 12.4Z" />
+  </svg>
+);
+
+export const WillowIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
+    <path d="M12 21v-7" />
+    <path d="M5.4 10.6a4.2 4.2 0 0 1 3.1-6.4 4.1 4.1 0 0 1 7 0 4.2 4.2 0 0 1 3.1 6.4" />
+    <path d="M5.6 10.4c0 2.4.6 4 1.4 5M12 10.2c0 3 .1 5 .6 6.4M18.4 10.4c0 2.4-.7 4-1.5 5M9 10.6c-.1 2.6.2 4.3.8 5.5M15 10.6c.1 2.6-.2 4.3-.8 5.5" />
+  </svg>
+);
+
+export const BirchIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
+    <path d="M12 21V6" />
+    <path d="M12 2.8c2.7 0 4.6 2.3 4.6 5.3S14.5 14 12 14s-4.6-2.9-4.6-5.9S9.3 2.8 12 2.8Z" />
+    <path d="m12 9.5 2.4-2.2M12 12.4 9.6 10.2" />
+  </svg>
+);

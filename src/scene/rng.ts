@@ -25,3 +25,10 @@ export function makeRng(seed: number): Rng {
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const clamp01 = (v: number) => clamp(v, 0, 1);
+
+/** Classic smoothstep on an already-normalised t. */
+export const smoothstep = (t: number) => t * t * (3 - 2 * t);
+
+/** Eased 0..1 used for camera motion so the swing does not start or stop abruptly. */
+export const easeInOutCubic = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;

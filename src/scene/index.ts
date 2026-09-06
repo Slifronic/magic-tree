@@ -4,13 +4,14 @@ import { buildPlot, type PlotMeshes } from './plot';
 import { buildCanopy, type Canopy } from './canopy';
 import { buildMotes, type Motes } from './motes';
 import { CELL, HEDGE_RING, ISO_AZIMUTH, ISO_ELEVATION, TOP_ELEVATION } from './constants';
-import { clamp01, lerp } from './rng';
+import { clamp01, lerp, easeInOutCubic } from './rng';
 import type { Palette } from './palette';
+import { SPECIES, type Species, type SpeciesId } from './species';
 
 export type ViewMode = 'tree' | 'code';
 
 /** Seconds for a full canopy <-> code transition. */
-const MORPH_SECONDS = 1.7;
+const MORPH_SECONDS = 0.95;
 
 export class MagicTreeScene {
   private renderer: THREE.WebGLRenderer;
@@ -26,8 +27,12 @@ export class MagicTreeScene {
   private qr!: QrMatrix;
   private world = new THREE.Group();
   private target = new THREE.Vector3();
+  private offset = new THREE.Vector3();
+  private forward = new THREE.Vector3();
+  private screenUp = new THREE.Vector3();
 
   private palette: Palette;
+  private species: Species;
   private morph = 0;
   private morphTarget = 0;
   private lastTime = 0;
@@ -36,16 +41,25 @@ export class MagicTreeScene {
   private frame = 0;
   private disposed = false;
 
-  private isoView = 20;
+  private isoHalfW = 20;
+  private isoHalfV = 20;
   private rimUnits = 40;
+  /** Height of the control dock in CSS px, reported by the UI. */
+  private dockPx = 200;
 
   onMorphChange?: (t: number) => void;
 
   private canvas: HTMLCanvasElement;
 
-  constructor(canvas: HTMLCanvasElement, text: string, palette: Palette) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    text: string,
+    palette: Palette,
+    species: Species = SPECIES.oak,
+  ) {
     this.canvas = canvas;
     this.palette = palette;
+    this.species = species;
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -82,17 +96,13 @@ export class MagicTreeScene {
   private build(text: string) {
     this.qr = buildQr(text);
     this.plot = buildPlot(this.qr, this.palette);
-    this.canopy = buildCanopy(this.qr, this.palette);
+    this.canopy = buildCanopy(this.qr, this.palette, this.species);
     this.motes = buildMotes(this.qr, this.palette);
     this.world.add(this.plot.group, this.canopy.group, this.motes.points);
 
     const rim = (this.qr.plot + HEDGE_RING * 2) * CELL;
-    const treeHeight = this.canopy.model.height;
-
-    // The iso framing is fixed; the top-down one is fitted per resize because it
-    // has to dodge the control dock.
     this.rimUnits = rim;
-    this.isoView = (treeHeight * 0.5 + rim * 0.34) * 1.06;
+    this.measureIsoFraming(rim);
 
     const shadowExtent = rim * 0.8;
     const cam = this.key.shadow.camera;
@@ -105,6 +115,51 @@ export class MagicTreeScene {
     cam.updateProjectionMatrix();
 
     this.canopy.setMorph(this.morph, 0);
+  }
+
+  /**
+   * Measures how much screen space the scene needs at the isometric angle by
+   * projecting the plot corners and the canopy's bounding box onto the camera's
+   * screen axes. Fitting to the foliage rather than the branch tips is what
+   * stops a wide crown being clipped.
+   */
+  private measureIsoFraming(rim: number) {
+    const { canopyTop, canopyRadius } = this.canopy.model;
+    const targetY = canopyTop * 0.42;
+
+    const dir = new THREE.Vector3(
+      Math.cos(ISO_ELEVATION) * Math.sin(ISO_AZIMUTH),
+      Math.sin(ISO_ELEVATION),
+      Math.cos(ISO_ELEVATION) * Math.cos(ISO_AZIMUTH),
+    ).normalize();
+    const forward = dir.clone().negate();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+    const half = rim / 2;
+    const points: THREE.Vector3[] = [
+      new THREE.Vector3(-half, 0, -half),
+      new THREE.Vector3(half, 0, -half),
+      new THREE.Vector3(-half, 0, half),
+      new THREE.Vector3(half, 0, half),
+    ];
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        points.push(new THREE.Vector3(sx * canopyRadius, 0, sz * canopyRadius));
+        points.push(new THREE.Vector3(sx * canopyRadius, canopyTop, sz * canopyRadius));
+      }
+    }
+
+    let w = 0;
+    let v = 0;
+    const rel = new THREE.Vector3();
+    for (const p of points) {
+      rel.copy(p).sub(new THREE.Vector3(0, targetY, 0));
+      w = Math.max(w, Math.abs(rel.dot(right)));
+      v = Math.max(v, Math.abs(rel.dot(up)));
+    }
+    this.isoHalfW = w * 1.05;
+    this.isoHalfV = v * 1.05;
   }
 
   private teardown() {
@@ -125,6 +180,23 @@ export class MagicTreeScene {
     if (text === this.qr.text) return;
     this.teardown();
     this.build(text);
+  }
+
+  setSpecies(species: SpeciesId | Species) {
+    const next = typeof species === 'string' ? SPECIES[species] : species;
+    if (next.id === this.species.id) return;
+    this.species = next;
+    const text = this.qr.text;
+    this.teardown();
+    this.build(text);
+  }
+
+  /** The UI measures its own dock so the code is always framed clear of it. */
+  setDockHeight(px: number) {
+    const next = Math.max(0, px);
+    if (Math.abs(next - this.dockPx) < 1) return;
+    this.dockPx = next;
+    this.updateCamera(true);
   }
 
   setPalette(palette: Palette) {
@@ -175,13 +247,15 @@ export class MagicTreeScene {
    * plot into the area *above* the control dock so no UI ever covers a module.
    */
   private updateCamera(force = false) {
-    const t = this.morph;
+    // The camera runs on an eased copy of the morph so the swing eases in and
+    // out instead of starting and stopping dead.
+    const t = easeInOutCubic(this.morph);
     const w = this.canvas.clientWidth || 1;
     const h = this.canvas.clientHeight || 1;
     const aspect = w / h;
 
     const margin = 1.07;
-    const dockPx = Math.min(200, h * 0.4);
+    const dockPx = Math.min(this.dockPx + 20, h * 0.55);
     const usable = Math.max(h - dockPx, h * 0.5);
     const halfRim = (this.rimUnits / 2) * margin;
     // Whichever axis is tighter decides the zoom.
@@ -189,8 +263,11 @@ export class MagicTreeScene {
     // Shift the framing down-world so the plot rides above the dock on screen.
     const topPan = topHalf * (dockPx / h);
 
-    const half = lerp(this.isoView, topHalf, t);
-    const panZ = lerp(0, topPan, t);
+    const isoHalf = Math.max(this.isoHalfV, this.isoHalfW / aspect);
+    const half = lerp(isoHalf, topHalf, t);
+    // The iso view needs a partial shift too, or a tall dock eats the near
+    // corner of the plot.
+    const shift = lerp(topPan * 0.55, topPan, t);
 
     this.camera.left = -half * aspect;
     this.camera.right = half * aspect;
@@ -202,17 +279,24 @@ export class MagicTreeScene {
 
     const azimuth = lerp(ISO_AZIMUTH, 0, t);
     const elevation = lerp(ISO_ELEVATION, TOP_ELEVATION, t);
-    const targetY = lerp(this.canopy.model.height * 0.42, 0, t);
+    const targetY = lerp(this.canopy.model.canopyTop * 0.42, 0, t);
     const r = 220;
 
-    this.target.set(0, targetY, panZ);
-    this.camera.position
-      .set(
-        r * Math.cos(elevation) * Math.sin(azimuth),
-        r * Math.sin(elevation),
-        r * Math.cos(elevation) * Math.cos(azimuth),
-      )
-      .add(this.target);
+    this.offset.set(
+      r * Math.cos(elevation) * Math.sin(azimuth),
+      r * Math.sin(elevation),
+      r * Math.cos(elevation) * Math.cos(azimuth),
+    );
+
+    // Screen-up in world space, so the dock shift works at any camera angle.
+    this.forward.copy(this.offset).normalize().negate();
+    this.screenUp
+      .set(0, 1, 0)
+      .addScaledVector(this.forward, -this.forward.y)
+      .normalize();
+
+    this.target.set(0, targetY, 0).addScaledVector(this.screenUp, -shift);
+    this.camera.position.copy(this.target).add(this.offset);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.target);
 
