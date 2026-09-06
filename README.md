@@ -1,5 +1,7 @@
 # Magic Tree
 
+**[magic-tree-three.vercel.app](https://magic-tree-three.vercel.app)**
+
 An isometric 3D tree whose plot **is** a scannable QR code. Tap it and the canopy
 comes apart leaf by leaf, each one flying down into a module of the code below.
 
@@ -37,7 +39,7 @@ Silhouette is finished by a post-pass. `taper` pulls the canopy in toward its
 axis with height, so the outline is exact even though the branching underneath
 stays organic.
 
-## Running it
+## Running it locally
 
 ```bash
 npm install
@@ -50,6 +52,9 @@ npm run dev
 | `npm run build` | Type-check and build to `dist/` |
 | `npm test` | Run the test suite |
 | `npm run lint` | Lint with oxlint |
+
+Deployed on Vercel as a static build; `vercel --prod` from the repo root
+publishes it.
 
 ## How it works
 

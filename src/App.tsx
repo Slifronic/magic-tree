@@ -72,12 +72,16 @@ export default function App() {
     sceneRef.current = scene;
 
     const onResize = () => scene.resize();
-    window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
+    // Observing the canvas catches every size change, including the ones that
+    // never fire a window resize -- a restored background tab, a container
+    // relayout, or the canvas coming back from a zero-sized state.
+    const ro = new ResizeObserver(onResize);
+    ro.observe(canvasRef.current);
 
     return () => {
-      window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
+      ro.disconnect();
       scene.dispose();
       sceneRef.current = null;
     };
